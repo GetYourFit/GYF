@@ -1,0 +1,13 @@
+flask
+torch
+torchvision
+numpy
+opencv-python
+Pillow
+faiss-cpu
+tqdm
+scikit-learn
+pyyaml
+ultralytics
+mediapipe
+git+https://github.com/openai/CLIP.git
