@@ -1,13 +1,25 @@
+# 🔧 Core
 flask
+flask-cors
+pyyaml
+tqdm
+numpy
+Pillow
+scikit-learn
+
+# ⚙️ Torch + Faiss
 torch
 torchvision
-numpy
-opencv-python
-Pillow
 faiss-cpu
-tqdm
-scikit-learn
-pyyaml
-ultralytics
+
+# 📷 Computer Vision
+opencv-python
 mediapipe
-git+https://github.com/openai/CLIP.git
+ultralytics
+
+# 🤗 NLP + CLIP
+transformers
+
+# 🧠 Face Analysis (Gender, Age, etc.)
+insightface
+onnxruntime

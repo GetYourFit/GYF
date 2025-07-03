@@ -1,36 +1,93 @@
 import json
 import torch
-import clip
 import faiss
 import numpy as np
 import yaml
 import cv2
+import os
 from PIL import Image
 from ultralytics import YOLO
 from sklearn.cluster import KMeans
 from mediapipe.python.solutions.pose import Pose
+from transformers import CLIPProcessor, CLIPModel
+import re
+import insightface
+from insightface.app import FaceAnalysis
 
-# Load models
+def load_insightface_model():
+    """
+    Loads the InsightFace gender (and age) model using 'buffalo_l'.
+    Returns the model ready for inference.
+    """
+    model = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
+    model.prepare(ctx_id=0)
+    print("InsightFace model loaded successfully.")
+    return model
+
+# Setup
 device = "cuda" if torch.cuda.is_available() else "cpu"
-clip_model, preprocess = clip.load("ViT-B/32", device=device)
+clip_model = CLIPModel.from_pretrained("patrickjohncyh/fashion-clip").to(device)
+processor = CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
+gender_model=load_insightface_model()
 
-clothing_model = YOLO("ML/best.pt")
-face_model = YOLO("ML/yolov8n-face.pt")
+clothing_model = YOLO("best.pt")
+face_model = YOLO("yolov8n-face.pt")
 pose_model = Pose(static_image_mode=True)
 
-with open("ML/data.yaml", "r") as f:
+with open("data.yaml", "r") as f:
     class_names = yaml.safe_load(f)["names"]
 
-import re
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+IMAGE_DIR = os.path.join(BASE_DIR, "images")
+
+# Category importance weights for outfit completion
+CATEGORY_WEIGHTS = {
+    "tops": 0.9,
+    "bottoms": 0.9,
+    "dresses": 0.95,
+    "shoes": 0.7,
+    "bags": 0.4,
+    "accessories": 0.3,
+    "outerwear": 0.6
+}
+
+# Utility functions
+
+def detect_gender(img_bgr, model):
+    """
+    Performs gender detection using the given InsightFace model.
+
+    Args:
+        img_bgr (np.ndarray): BGR image as a numpy array.
+        model: Loaded InsightFace model.
+
+    Returns:
+        List of dicts with gender, age, and bounding box.
+    """
+    if img_bgr is None or not hasattr(img_bgr, 'shape'):
+        raise ValueError("Invalid image input.")
+
+    faces = model.get(img_bgr)
+    results = []
+
+    for face in faces:
+        gender = 'Female' if face.gender == 0 else 'Male'
+        results.append({
+            "bbox": [int(v) for v in face.bbox],
+            "gender": gender,
+            "age": int(face.age)
+        })
+
+    return results
+
+
 
 def extract_first_price(price_str):
     if not isinstance(price_str, str):
         return None
-    # Find all numeric values
     numbers = re.findall(r'\d[\d,]*', price_str)
     if numbers:
-        price = int(numbers[0].replace(',', ''))
-        return price
+        return int(numbers[0].replace(',', ''))
     return None
 
 def detect_face_bbox_yolo(image_bgr):
@@ -69,8 +126,15 @@ def estimate_body_type(image_bgr):
     return "rectangle"
 
 def process_user_image(image_file, prompt):
+    # Add in process_user_image()
+    
     image = Image.open(image_file).convert("RGB")
     image_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    user_gender = None
+    
+    gender_results = detect_gender(image_bgr, gender_model)
+    if gender_results:
+        user_gender = gender_results[0]['gender'].lower()
 
     results = clothing_model.predict(image_bgr, verbose=False)[0]
 
@@ -82,21 +146,24 @@ def process_user_image(image_file, prompt):
         x1, y1, x2, y2 = map(int, box)
         crop = image_bgr[y1:y2, x1:x2]
         crop_pil = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
-        tensor = preprocess(crop_pil).unsqueeze(0).to(device)
+        inputs = processor(images=crop_pil, return_tensors="pt").to(device)
         with torch.no_grad():
-            emb = clip_model.encode_image(tensor).cpu().numpy()
-        embeddings[class_names[int(cls_id)]] = emb.flatten().tolist()
+            emb = clip_model.get_image_features(**inputs)
+        emb_norm = emb / emb.norm(dim=-1, keepdim=True)
+        embeddings[class_names[int(cls_id)]] = emb_norm.cpu().numpy().flatten().tolist()
 
     # Text embedding
     desc = prompt.split()[:30]
-    text_input = clip.tokenize([" ".join(desc)]).to(device)
+    inputs = processor(text=[" ".join(desc)], return_tensors="pt").to(device)
     with torch.no_grad():
-        text_emb = clip_model.encode_text(text_input).cpu().numpy().flatten()
+        text_emb = clip_model.get_text_features(**inputs)
+    text_emb = text_emb / text_emb.norm(dim=-1, keepdim=True)
 
     skin_tone = detect_skin_tone_from_yolo(image_bgr)
     body_type = estimate_body_type(image_bgr)
 
-    return embeddings, text_emb, body_type, skin_tone
+    return embeddings, text_emb.cpu().numpy().flatten(), body_type, skin_tone, user_gender
+
 
 def load_embeddings(path):
     with open(path) as f:
@@ -105,7 +172,6 @@ def load_embeddings(path):
     vecs, metadata = [], []
     for i, entry in enumerate(db):
         vec = []
-        valid = True
 
         for cls in class_names:
             item = entry["items"].get(cls)
@@ -132,65 +198,166 @@ def load_embeddings(path):
     index.add(vecs_np)
     return index, metadata, class_names
 
-
-
 def cosine_similarity(vec1, vec2):
     vec1 = np.squeeze(np.array(vec1))
     vec2 = np.squeeze(np.array(vec2))
     return float(np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2) + 1e-8))
 
-
-def retrieve_similar_outfits(user_embeddings, text_emb, body_type, skin_tone, budget, faiss_index, outfit_data, top_k=5, faiss_k=100):
-    # Step 1: Create padded query vector for FAISS
-    full_query = []
+def compute_complementarity_score(user_embeddings, candidate_entry):
+    """Compute how well candidate items complement user's existing items"""
+    available_classes = [cls for cls, emb in user_embeddings.items() if emb is not None]
+    
+    # Look for style consistency across the complete outfit
+    all_items = []
+    
+    # Add user's items
+    for cls in available_classes:
+        if user_embeddings[cls]:
+            all_items.append(user_embeddings[cls])
+    
+    # Add candidate's missing items
     for cls in class_names:
-        emb = user_embeddings.get(cls)
-        full_query.extend(emb if emb else [0] * 512)
-    full_query.extend(text_emb)
-    query_np = np.array(full_query).astype("float32").reshape(1, -1)
+        if cls not in available_classes:
+            candidate_item = candidate_entry["items"].get(cls)
+            if candidate_item and "embedding" in candidate_item:
+                all_items.append(candidate_item["embedding"])
+    
+    if len(all_items) < 2:
+        return 0.5
+    
+    # Compute pairwise similarities and look for moderate consistency
+    similarities = []
+    for i in range(len(all_items)):
+        for j in range(i+1, len(all_items)):
+            sim = cosine_similarity(all_items[i], all_items[j])
+            similarities.append(sim)
+    
+    avg_sim = np.mean(similarities)
+    # Sweet spot: moderate similarity indicates good style coherence
+    if 0.3 <= avg_sim <= 0.7:
+        return 1.0
+    elif avg_sim < 0.3:
+        return 0.6  # Too different
+    else:
+        return 0.4  # Too similar
 
-    _, indices = faiss_index.search(query_np, faiss_k)
+def create_weighted_embedding(user_embeddings, text_emb):
+    """Create a style-aware embedding for better matching"""
+    # Combine available item embeddings
+    item_embeddings = [emb for emb in user_embeddings.values() if emb is not None]
+    
+    if not item_embeddings:
+        return text_emb
+    
+    # Average item embeddings and combine with text
+    avg_item_emb = np.mean(item_embeddings, axis=0)
+    combined = 0.6 * text_emb + 0.4 * avg_item_emb
+    return combined / np.linalg.norm(combined)
 
-    # Step 2: Get available and missing classes
+def retrieve_similar_outfits(user_embeddings, text_emb, body_type, skin_tone, budget, outfit_data, user_gender=None, top_k=5):
+    """
+    Improved outfit completion that focuses on complementarity and gender match.
+    """
     available_classes = [cls for cls, emb in user_embeddings.items() if emb is not None]
     missing_classes = [cls for cls in class_names if cls not in available_classes]
 
-    # Step 3: Re-rank manually
+    if not missing_classes:
+        return []  # User already has complete outfit
+
     scored_entries = []
-    for idx in indices[0]:
-        entry = outfit_data[idx]
 
-        # Body/skin tone filtering
-        if (entry["body_type"] != body_type and entry["body_type"] != "unknown") or \
-           (entry["skin_tone"] != skin_tone and entry["skin_tone"] != "unknown"):
-            continue
+    for entry in outfit_data:
+        # ✅ Gender compatibility check
+        gender_info = entry.get("gender", [])
+        if isinstance(gender_info, list) and gender_info:
+            candidate_gender = gender_info[0].get("gender", "").lower()
+        else:
+            candidate_gender = "unknown"
 
-        # Budget filtering
-        price = extract_first_price(entry["price"])
+        if user_gender and candidate_gender and user_gender != candidate_gender:
+            continue  # Skip incompatible gender
+
+        # Body type score
+        body_score = 1.0
+        if body_type != "unknown" and entry.get("body_type") != "unknown":
+            body_score = 1.0 if entry["body_type"] == body_type else 0.7
+
+        # Skin tone score
+        skin_score = 1.0
+        if skin_tone != "unknown" and entry.get("skin_tone") != "unknown":
+            skin_score = 1.0 if entry["skin_tone"] == skin_tone else 0.8
+
+        # Budget filter (hard filter)
+        price = extract_first_price(entry.get("price", ""))
         if price and price > budget:
             continue
 
-        # Class-specific similarity
-        sim = 0
-        valid = 0
+        # Check for missing item overlap
+        available_missing_items = [cls for cls in missing_classes if cls in entry["items"] and entry["items"][cls]]
+        if not available_missing_items:
+            continue
+
+        # Complementarity
+        complementarity_score = compute_complementarity_score(user_embeddings, entry)
+
+        # Style compatibility
+        style_compatibility = 0
+        valid_comparisons = 0
         for cls in available_classes:
             user_vec = user_embeddings.get(cls)
             candidate_item = entry["items"].get(cls)
-            if user_vec and candidate_item:
-                sim += cosine_similarity(user_vec, candidate_item["embedding"])
-                valid += 1
+            if user_vec and candidate_item and "embedding" in candidate_item:
+                sim = cosine_similarity(user_vec, candidate_item["embedding"])
+                if 0.2 <= sim <= 0.8:
+                    style_compatibility += min(sim * 1.2, 1.0)
+                else:
+                    style_compatibility += sim * 0.7
+                valid_comparisons += 1
+        clothing_score = style_compatibility / valid_comparisons if valid_comparisons else 0.5
 
-        if valid == 0:
-            continue
-
-        clothing_score = sim / valid
-
-        # Text similarity
+        # Text embedding match
         text_score = cosine_similarity(text_emb, entry["text_embedding"])
 
-        # Combined score
-        final_score = 0.7 * clothing_score + 0.3 * text_score
+        # Weight missing items
+        missing_item_score = np.mean([CATEGORY_WEIGHTS.get(cls, 0.5) for cls in available_missing_items])
 
-        scored_entries.append((final_score, entry))
+        final_score = (
+            0.3 * clothing_score +
+            0.4 * text_score +
+            0.2 * complementarity_score +
+            0.1 * missing_item_score
+        )
 
-    # Step 4: Sort and extract missing parts only
+        final_score *= body_score * skin_score
+
+        if final_score < 0.4:
+            continue
+
+        scored_entries.append((final_score, entry, available_missing_items))
+
+    scored_entries.sort(key=lambda x: -x[0])
+
+    recommendations = []
+    for score, entry, available_missing_items in scored_entries[:top_k]:
+        items_to_return = {}
+        for cls in available_missing_items:
+            item = entry["items"][cls]
+            if item:
+                items_to_return[cls] = {
+                    "class": cls,
+                    "bbox": item.get("bbox", []),
+                    "confidence": score
+                }
+
+        recommendations.append({
+            "set_id": entry.get("imageFile", ""),
+            "title": entry.get("title", ""),
+            "product_url": entry.get("product_url", ""),
+            "image_url": entry.get('image_url', ""),
+            "gender": entry.get("gender", "unknown"), 
+            "confidence_score": round(score, 3),
+            "items": items_to_return,
+            "missing_categories": available_missing_items
+        })
+
+    return recommendations
