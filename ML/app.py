@@ -4,6 +4,7 @@ import util
 from flask_cors import CORS
 import logging
 import time
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -12,15 +13,26 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load embeddings once at startup
-logger.info("Loading embeddings...")
-start_time = time.time()
-faiss_index, outfit_data, class_names = test.load_embeddings("output_embeddings_merged.json")
-logger.info(f"Loaded {len(outfit_data)} outfits in {time.time() - start_time:.2f}s")
+# Cache for embeddings per category
+embedding_cache = {}
+
+def load_embeddings_for_category(category):
+    if category in embedding_cache:
+        return embedding_cache[category]
+
+    file_path = f"output_embeddings_{category}.json"
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Embedding file for category '{category}' not found.")
+
+    logger.info(f"Loading embeddings for category '{category}'...")
+    start = time.time()
+    faiss_index, outfit_data, class_names = test.load_embeddings(file_path)
+    embedding_cache[category] = (faiss_index, outfit_data, class_names)
+    logger.info(f"Loaded {len(outfit_data)} outfits in {time.time() - start:.2f}s for category '{category}'")
+    return faiss_index, outfit_data, class_names
 
 
 def handle_recommendation_request(process_user_image_func, retrieve_similar_outfits_func, top_k_cap=20):
-    """Shared handler for recommendation endpoints"""
     try:
         if 'image' not in request.files:
             return jsonify({"error": "Image file is required."}), 400
@@ -34,6 +46,10 @@ def handle_recommendation_request(process_user_image_func, retrieve_similar_outf
             return jsonify({"error": "Uploaded file must be an image."}), 400
 
         prompt = request.form.get("prompt", "").strip()
+        category = request.form.get("category", "").strip().lower()
+
+        if not category:
+            return jsonify({"error": "Category is required."}), 400
 
         try:
             budget = int(request.form.get("budget", "1000000"))
@@ -47,9 +63,13 @@ def handle_recommendation_request(process_user_image_func, retrieve_similar_outf
         except (ValueError, TypeError):
             top_k = 5
 
+        try:
+            faiss_index, outfit_data, class_names = load_embeddings_for_category(category)
+        except FileNotFoundError as e:
+            return jsonify({"error": str(e)}), 400
+
         start_time = time.time()
 
-        # Process image
         user_embeddings, text_emb, body_type, skin_tone, user_gender = process_user_image_func(image, prompt)
 
         detected_items = [cls for cls, emb in user_embeddings.items() if emb is not None]
@@ -61,7 +81,6 @@ def handle_recommendation_request(process_user_image_func, retrieve_similar_outf
                 "detected_items": detected_items
             }), 400
 
-        # Get recommendations
         recommendations = retrieve_similar_outfits_func(
             user_embeddings,
             text_emb,
@@ -86,12 +105,13 @@ def handle_recommendation_request(process_user_image_func, retrieve_similar_outf
             "search_parameters": {
                 "budget": budget,
                 "prompt": prompt,
+                "category": category,
                 "top_k": top_k
             }
         }
 
         logger.info(
-            f"Recommendation request processed in {processing_time:.2f}s - "
+            f"[{category}] Processed in {processing_time:.2f}s - "
             f"Detected: {detected_items}, Recommendations: {len(recommendations)}"
         )
 
@@ -125,13 +145,18 @@ def recommend():
 def health_check():
     return jsonify({
         "status": "healthy",
-        "total_outfits": len(outfit_data),
-        "clothing_classes": class_names
+        "cached_categories": list(embedding_cache.keys())
     })
 
 
-@app.route("/stats", methods=["GET"])
-def get_stats():
+@app.route("/stats/<category>", methods=["GET"])
+def get_stats(category):
+    category = category.strip().lower()
+    try:
+        _, outfit_data, class_names = load_embeddings_for_category(category)
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 400
+
     category_counts = {}
     for outfit in outfit_data:
         for cls in class_names:
@@ -139,6 +164,7 @@ def get_stats():
                 category_counts[cls] = category_counts.get(cls, 0) + 1
 
     return jsonify({
+        "category": category,
         "total_outfits": len(outfit_data),
         "clothing_classes": class_names,
         "items_per_category": category_counts

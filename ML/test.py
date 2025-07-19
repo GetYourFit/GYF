@@ -13,6 +13,7 @@ from transformers import CLIPProcessor, CLIPModel
 import re
 import insightface
 from insightface.app import FaceAnalysis
+from collections import defaultdict
 
 def load_insightface_model():
     """
@@ -254,20 +255,211 @@ def create_weighted_embedding(user_embeddings, text_emb):
     combined = 0.6 * text_emb + 0.4 * avg_item_emb
     return combined / np.linalg.norm(combined)
 
-def retrieve_similar_outfits(user_embeddings, text_emb, body_type, skin_tone, budget, outfit_data, user_gender=None, top_k=5):
+
+# Enhanced keyword system with synonyms and fuzzy matching
+ENHANCED_STYLE_KEYWORDS = {
+    # Formality levels
+    'casual': {
+        'synonyms': ['relaxed', 'laid-back', 'easygoing', 'informal', 'everyday', 'comfortable'],
+        'weight': 2.0,
+        'excludes': ['formal', 'business', 'suit', 'blazer', 'office', 'professional', 'dressy'],
+        'boosts': ['denim', 'sneakers', 'tshirt', 'hoodie', 'shorts']
+    },
+    'formal': {
+        'synonyms': ['dressy', 'elegant', 'sophisticated', 'classy', 'refined'],
+        'weight': 2.0,
+        'excludes': ['casual', 'relaxed', 'streetwear', 'sporty', 'laid-back', 'informal'],
+        'boosts': ['suit', 'blazer', 'dress', 'heels', 'tie']
+    },
+    'business': {
+        'synonyms': ['professional', 'office', 'corporate', 'work'],
+        'weight': 1.8,
+        'excludes': ['casual', 'streetwear', 'sporty', 'beach', 'party'],
+        'boosts': ['blazer', 'trousers', 'shirt', 'blouse']
+    },
+    
+    # Style categories
+    'sporty': {
+        'synonyms': ['athletic', 'activewear', 'gym', 'workout', 'fitness'],
+        'weight': 1.5,
+        'excludes': ['formal', 'business', 'elegant', 'sophisticated', 'dressy'],
+        'boosts': ['sneakers', 'leggings', 'tracksuit', 'sportswear']
+    },
+    'streetwear': {
+        'synonyms': ['urban', 'hip-hop', 'street', 'edgy', 'trendy'],
+        'weight': 1.5,
+        'excludes': ['formal', 'business', 'elegant', 'conservative'],
+        'boosts': ['sneakers', 'hoodie', 'caps', 'oversized']
+    },
+    'bohemian': {
+        'synonyms': ['boho', 'hippie', 'free-spirited', 'artsy', 'eclectic'],
+        'weight': 1.3,
+        'excludes': ['formal', 'business', 'sporty', 'minimalist', 'corporate'],
+        'boosts': ['flowy', 'patterns', 'layers', 'accessories']
+    },
+    'minimalist': {
+        'synonyms': ['clean', 'simple', 'sleek', 'modern', 'understated'],
+        'weight': 1.3,
+        'excludes': ['bohemian', 'maximalist', 'busy', 'ornate', 'flashy'],
+        'boosts': ['neutral', 'basic', 'clean lines']
+    },
+    'vintage': {
+        'synonyms': ['retro', 'classic', 'old-school', 'timeless', 'nostalgic'],
+        'weight': 1.2,
+        'excludes': ['modern', 'futuristic', 'contemporary', 'trendy'],
+        'boosts': ['classic', 'traditional', 'heritage']
+    },
+    
+    # Occasions
+    'party': {
+        'synonyms': ['celebration', 'festive', 'night out', 'clubbing', 'dancing'],
+        'weight': 1.5,
+        'excludes': ['work', 'business', 'casual', 'gym'],
+        'boosts': ['dressy', 'glamorous', 'sparkly', 'bold']
+    },
+    'date': {
+        'synonyms': ['romantic', 'dinner', 'special occasion'],
+        'weight': 1.3,
+        'excludes': ['gym', 'sporty', 'work'],
+        'boosts': ['attractive', 'stylish', 'flattering']
+    },
+    'beach': {
+        'synonyms': ['vacation', 'resort', 'tropical', 'seaside', 'summer'],
+        'weight': 1.5,
+        'excludes': ['formal', 'business', 'heavy', 'winter', 'warm'],
+        'boosts': ['light', 'breezy', 'sandals', 'shorts']
+    },
+    
+    # Colors with better handling
+    'black': {
+        'synonyms': ['dark', 'noir', 'charcoal'],
+        'weight': 1.0,
+        'boosts': ['monochrome', 'gothic', 'sleek']
+    },
+    'colorful': {
+        'synonyms': ['bright', 'vibrant', 'bold', 'rainbow', 'multicolor'],
+        'weight': 1.2,
+        'excludes': ['monochrome', 'neutral', 'muted'],
+        'boosts': ['patterns', 'prints', 'fun']
+    }
+}
+
+def extract_enhanced_keywords(text):
     """
-    Improved outfit completion that focuses on complementarity and gender match.
+    Enhanced keyword extraction with fuzzy matching and synonym support.
+    """
+    text_lower = text.lower()
+    found_keywords = []
+    
+    for main_keyword, props in ENHANCED_STYLE_KEYWORDS.items():
+        # Check main keyword
+        if main_keyword in text_lower:
+            found_keywords.append((main_keyword, props))
+            continue
+            
+        # Check synonyms
+        synonyms = props.get('synonyms', [])
+        for synonym in synonyms:
+            if synonym in text_lower:
+                found_keywords.append((main_keyword, props))  # Use main keyword
+                break
+    
+    return found_keywords
+
+def compute_enhanced_keyword_compatibility(user_keywords, candidate_text):
+    """
+    Enhanced compatibility with better scoring logic.
+    """
+    if not user_keywords:
+        return 1.0
+    
+    candidate_lower = candidate_text.lower()
+    score = 1.0
+    boost_applied = False
+    penalty_applied = False
+    
+    for main_keyword, props in user_keywords:
+        # Check for direct matches (main keyword + synonyms)
+        keyword_found = main_keyword in candidate_lower
+        if not keyword_found:
+            synonyms = props.get('synonyms', [])
+            for synonym in synonyms:
+                if synonym in candidate_lower:
+                    keyword_found = True
+                    break
+        
+        if keyword_found:
+            score *= props.get('weight', 1.0)
+            boost_applied = True
+        
+        # Check for exclusions (strong penalty)
+        excludes = props.get('excludes', [])
+        for exclude_word in excludes:
+            if exclude_word in candidate_lower:
+                score *= 0.2  # Very strong penalty for opposite styles
+                penalty_applied = True
+                break
+        
+        # Check for boosts (moderate boost)
+        boosts = props.get('boosts', [])
+        for boost_word in boosts:
+            if boost_word in candidate_lower:
+                score *= 1.3
+                boost_applied = True
+    
+    # Apply base penalty if no relevant keywords found
+    if not boost_applied and not penalty_applied:
+        score *= 0.8  # Slight penalty for no keyword relevance
+    
+    return min(score, 2.5)  # Cap boost
+
+def advanced_hybrid_text_similarity(user_text, candidate_text, text_embedding_user, text_embedding_candidate):
+    """
+    Advanced hybrid approach with multiple signals.
+    """
+    # 1. Semantic similarity
+    semantic_sim = cosine_similarity(text_embedding_user, text_embedding_candidate)
+    
+    # 2. Enhanced keyword compatibility
+    user_keywords = extract_enhanced_keywords(user_text)
+    keyword_score = compute_enhanced_keyword_compatibility(user_keywords, candidate_text)
+    
+    # 3. Simple word overlap (as backup)
+    user_words = set(user_text.lower().split())
+    candidate_words = set(candidate_text.lower().split())
+    word_overlap = len(user_words.intersection(candidate_words)) / len(user_words.union(candidate_words)) if user_words.union(candidate_words) else 0
+    
+    # 4. Advanced combination logic
+    if keyword_score < 0.4:
+        # Strong penalty for opposite styles
+        final_score = semantic_sim * 0.2 + word_overlap * 0.1
+    elif keyword_score > 1.5:
+        # Strong boost for matching styles
+        final_score = semantic_sim * keyword_score * 0.7 + word_overlap * 0.3
+    else:
+        # Balanced combination
+        final_score = semantic_sim * 0.6 + (keyword_score - 1.0) * 0.3 + word_overlap * 0.1
+    
+    return final_score, semantic_sim, keyword_score, word_overlap
+
+def retrieve_similar_outfits(user_embeddings, text_emb, body_type, skin_tone, budget, outfit_data, user_gender=None, user_text="", top_k=5, min_score=0.25):
+    """
+    Most robust approach combining multiple text matching strategies.
     """
     available_classes = [cls for cls, emb in user_embeddings.items() if emb is not None]
     missing_classes = [cls for cls in class_names if cls not in available_classes]
 
     if not missing_classes:
-        return []  # User already has complete outfit
+        return []
+
+    # Extract and log user keywords for debugging
+    user_keywords = extract_enhanced_keywords(user_text)
+    print(f"🔍 Detected style keywords: {[(kw[0], kw[1].get('weight', 1.0)) for kw in user_keywords]}")
 
     scored_entries = []
-
+    
     for entry in outfit_data:
-        # ✅ Gender compatibility check
+        # Apply hard filters first
         gender_info = entry.get("gender", [])
         if isinstance(gender_info, list) and gender_info:
             candidate_gender = gender_info[0].get("gender", "").lower()
@@ -275,70 +467,60 @@ def retrieve_similar_outfits(user_embeddings, text_emb, body_type, skin_tone, bu
             candidate_gender = "unknown"
 
         if user_gender and candidate_gender and user_gender != candidate_gender:
-            continue  # Skip incompatible gender
+            continue
 
-        # Body type score
-        body_score = 1.0
-        if body_type != "unknown" and entry.get("body_type") != "unknown":
-            body_score = 1.0 if entry["body_type"] == body_type else 0.7
-
-        # Skin tone score
-        skin_score = 1.0
-        if skin_tone != "unknown" and entry.get("skin_tone") != "unknown":
-            skin_score = 1.0 if entry["skin_tone"] == skin_tone else 0.8
-
-        # Budget filter (hard filter)
         price = extract_first_price(entry.get("price", ""))
         if price and price > budget:
             continue
 
-        # Check for missing item overlap
         available_missing_items = [cls for cls in missing_classes if cls in entry["items"] and entry["items"][cls]]
         if not available_missing_items:
             continue
 
-        # Complementarity
+        # Get candidate text
+        candidate_text = f"{entry.get('title', '')} {entry.get('description', '')}"
+        
+        # Advanced hybrid similarity
+        final_score, semantic_sim, keyword_score, word_overlap = advanced_hybrid_text_similarity(
+            user_text, candidate_text, text_emb, entry["text_embedding"]
+        )
+        
+        # Skip low-scoring matches
+        if final_score < min_score:
+            continue
+        
+        # Apply other factors with reduced weight
+        body_score = 1.0
+        if body_type != "unknown" and entry.get("body_type") != "unknown":
+            body_score = 1.0 if entry["body_type"] == body_type else 0.85
+
+        skin_score = 1.0
+        if skin_tone != "unknown" and entry.get("skin_tone") != "unknown":
+            skin_score = 1.0 if entry["skin_tone"] == skin_tone else 0.9
+
+        # Reduced weight for other factors since text matching is primary
         complementarity_score = compute_complementarity_score(user_embeddings, entry)
-
-        # Style compatibility
-        style_compatibility = 0
-        valid_comparisons = 0
-        for cls in available_classes:
-            user_vec = user_embeddings.get(cls)
-            candidate_item = entry["items"].get(cls)
-            if user_vec and candidate_item and "embedding" in candidate_item:
-                sim = cosine_similarity(user_vec, candidate_item["embedding"])
-                if 0.2 <= sim <= 0.8:
-                    style_compatibility += min(sim * 1.2, 1.0)
-                else:
-                    style_compatibility += sim * 0.7
-                valid_comparisons += 1
-        clothing_score = style_compatibility / valid_comparisons if valid_comparisons else 0.5
-
-        # Text embedding match
-        text_score = cosine_similarity(text_emb, entry["text_embedding"])
-
-        # Weight missing items
         missing_item_score = np.mean([CATEGORY_WEIGHTS.get(cls, 0.5) for cls in available_missing_items])
 
-        final_score = (
-            0.3 * clothing_score +
-            0.4 * text_score +
-            0.2 * complementarity_score +
-            0.1 * missing_item_score
+        # Final score heavily weighted towards text matching
+        total_score = (
+            0.75 * final_score +           # Dominant text matching
+            0.1 * complementarity_score +  # Style coherence
+            0.15 * missing_item_score      # Missing items importance
         )
 
-        final_score *= body_score * skin_score
+        total_score *= body_score * skin_score
 
-        if final_score < 0.4:
-            continue
-
-        scored_entries.append((final_score, entry, available_missing_items))
+        scored_entries.append((
+            total_score, entry, available_missing_items, 
+            final_score, semantic_sim, keyword_score, word_overlap
+        ))
 
     scored_entries.sort(key=lambda x: -x[0])
 
+    # Format results with detailed debugging info
     recommendations = []
-    for score, entry, available_missing_items in scored_entries[:top_k]:
+    for score, entry, available_missing_items, text_score, semantic_sim, keyword_score, word_overlap in scored_entries[:top_k]:
         items_to_return = {}
         for cls in available_missing_items:
             item = entry["items"][cls]
@@ -356,6 +538,10 @@ def retrieve_similar_outfits(user_embeddings, text_emb, body_type, skin_tone, bu
             "image_url": entry.get('image_url', ""),
             "gender": entry.get("gender", "unknown"), 
             "confidence_score": round(score, 3),
+            "text_score": round(text_score, 3),
+            "semantic_similarity": round(semantic_sim, 3),
+            "keyword_score": round(keyword_score, 3),
+            "word_overlap": round(word_overlap, 3),
             "items": items_to_return,
             "missing_categories": available_missing_items
         })
