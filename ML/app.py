@@ -4,9 +4,14 @@ import util
 from flask_cors import CORS
 import logging
 import time
+from tryon import run_tryon  # Import your DCI-VTON integration
+from pathlib import Path
 
 app = Flask(__name__)
 CORS(app)
+
+# Serve generated try-on images
+app.static_folder = "output"
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -143,6 +148,50 @@ def get_stats():
         "clothing_classes": class_names,
         "items_per_category": category_counts
     })
+
+@app.route("/try_on", methods=["POST"])
+def try_on():
+    try:
+        if 'user_image' not in request.files:
+            return jsonify({"error": "User image file is required."}), 400
+        if 'catalog_image_path' not in request.form:
+            return jsonify({"error": "Catalog image path is required."}), 400
+        if 'bbox' not in request.form:
+            return jsonify({"error": "Bounding box (bbox) is required."}), 400
+
+        user_image = request.files['user_image']
+        catalog_image_path = request.form['catalog_image_path']
+        bbox_str = request.form['bbox']
+
+        # Validate bbox (YOLO format: x_center, y_center, width, height in normalized form)
+        try:
+            bbox = list(map(float, bbox_str.strip().split(',')))
+            if len(bbox) != 4:
+                raise ValueError()
+        except ValueError:
+            return jsonify({"error": "Invalid bbox format. Expected: 'x_center,y_center,width,height'"}), 400
+
+       
+        output_path = run_tryon(user_image, catalog_image_path, bbox)
+
+        filename = Path(output_path).name
+
+        return jsonify({
+            "success": True,
+            "output_path": f"/tryon_results/{filename}"
+        })
+
+    except Exception as e:
+        logger.error(f"Error in /try_on endpoint: {str(e)}", exc_info=True)
+        return jsonify({
+            "error": f"Internal server error: {str(e)}",
+            "success": False
+        }), 500
+
+@app.route('/tryon_results/<path:filename>')
+def serve_tryon_image(filename):
+    from flask import send_from_directory
+    return send_from_directory('output/tryon', filename)
 
 
 if __name__ == "__main__":
