@@ -6,6 +6,13 @@ import logging
 import time
 from tryon import run_tryon  # Import your DCI-VTON integration
 from pathlib import Path
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+IMAGE_DIR = os.path.join(BASE_DIR)
 
 app = Flask(__name__)
 CORS(app)
@@ -160,22 +167,27 @@ def try_on():
             return jsonify({"error": "Bounding box (bbox) is required."}), 400
 
         user_image = request.files['user_image']
-        catalog_image_path = request.form['catalog_image_path']
-        bbox_str = request.form['bbox']
+        catalog_image_rel_path = request.form['catalog_image_path']  # e.g. "shirts/top123.jpg"
+        bbox_str = request.form['bbox']  # e.g. "[0.5, 0.5, 0.4, 0.3]"
 
-        # Validate bbox (YOLO format: x_center, y_center, width, height in normalized form)
+        # Parse bbox array safely
         try:
-            bbox = list(map(float, bbox_str.strip().split(',')))
-            if len(bbox) != 4:
+            bbox = eval(bbox_str)
+            if not isinstance(bbox, list) or len(bbox) != 4:
                 raise ValueError()
-        except ValueError:
-            return jsonify({"error": "Invalid bbox format. Expected: 'x_center,y_center,width,height'"}), 400
+            bbox = list(map(float, bbox))
+        except Exception:
+            return jsonify({"error": "Invalid bbox format. Expected array: [x_center, y_center, width, height]"}), 400
 
-       
+        # Resolve full catalog image path
+        catalog_image_path = os.path.join(IMAGE_DIR, catalog_image_rel_path)
+        if not os.path.exists(catalog_image_path):
+            return jsonify({"error": "Catalog image does not exist on server."}), 400
+
+        # Call virtual try-on pipeline
         output_path = run_tryon(user_image, catalog_image_path, bbox)
 
         filename = Path(output_path).name
-
         return jsonify({
             "success": True,
             "output_path": f"/tryon_results/{filename}"
