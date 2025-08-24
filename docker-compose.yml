@@ -1,0 +1,23 @@
+# version: "3.9"  # Use 3.8+ to support device reservations
+
+services:
+  ML:
+    build: ./ML
+    image: ml-image
+    volumes:
+      - ./ML/output/tryon:/app
+    ports:
+      - "5000:5000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    runtime: nvidia  # NOTE: Only used in Docker Swarm mode (optional)
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+
+
+# docker compose up --build --gpus all
