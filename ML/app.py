@@ -117,6 +117,11 @@ def handle_recommendation_request(process_user_image_func, retrieve_similar_outf
         }), 500
 
 
+@app.route("/",methods=["GET"])
+def home():
+    return jsonify({
+        "messsage":"hello there this is my server"
+    })
 @app.route("/recommend_without_base_64", methods=["POST"])
 def recommend_without_base_64():
     return handle_recommendation_request(
