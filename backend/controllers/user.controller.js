@@ -51,31 +51,51 @@ export const registerUser = asyncHandler(async (req, res) => {
 
 
 export const loginUser = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-
-  const user = await User.findOne({ email });
-
-  if (user && (await user.matchPassword(password))) {
-    const token = generateToken(user._id);
-    res.status(200).json({
-      user:{
-
-        _id: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email,
-      PhoneNumber: user.PhoneNumber,
-      Gender: user.Gender,
-      DOB: user.DOB,
-      },
-      
-      token: token,
-    });
-  } else {
-    res.status(401);
-    throw new Error("Invalid credentials");
-  }
-});
+    const { email, password } = req.body;
+  
+    const user = await User.findOne({ email });
+  
+    if (user && (await user.matchPassword(password))) {
+      const token = generateToken(user._id);
+  
+      // 🔹 Call Gemini AI to generate insights
+      try {
+        const insights = await storeInsights(user); 
+  
+        res.status(200).json({
+          user: {
+            _id: user._id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            PhoneNumber: user.PhoneNumber,
+            Gender: user.Gender,
+            DOB: user.DOB,
+          },
+          token: token,
+          insights: insights, // optional return
+        });
+      } catch (err) {
+        console.error("Error generating insights:", err.message);
+        res.status(200).json({
+          user: {
+            _id: user._id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            PhoneNumber: user.PhoneNumber,
+            Gender: user.Gender,
+            DOB: user.DOB,
+          },
+          token: token,
+          insights: null,
+        });
+      }
+    } else {
+      res.status(401);
+      throw new Error("Invalid credentials");
+    }
+  });
 
 // Get All Users (Search)
 export const allUsers = asyncHandler(async (req, res) => {

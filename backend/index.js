@@ -4,6 +4,7 @@ import dotenv from "dotenv"
 import MongoDB from "./utils/MongoDb.js"
 import userRoutes from "./routes/user.routes.js"
 import recommendationRoutes from "./routes/recommendation.routes.js"
+import orderRoutes from "./routes/order.routes.js"
 
 
 dotenv.config({})
@@ -21,6 +22,7 @@ app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use('/api/users',userRoutes);
 app.use('/api/recommend',recommendationRoutes);
+app.use('/api/orders',orderRoutes);
 
 
 
