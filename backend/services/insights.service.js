@@ -8,7 +8,6 @@ export const storeInsights = async (user) => {
   Name: ${user.firstName} ${user.lastName}
   Gender: ${user.Gender}
   Age: ${user.DOB ? new Date().getFullYear() - new Date(user.DOB).getFullYear() : "N/A"}
-  Budget: ${user.monthlyBudget || "Not provided"}
 
   Focus:
   - Practical fashion tips for their demographic
