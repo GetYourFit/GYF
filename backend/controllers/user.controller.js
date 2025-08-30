@@ -1,6 +1,7 @@
 import asyncHandler from "express-async-handler";
 import generateToken from "../utils/generateToken.js";
 import { User } from "../models/user.model.js";
+import {storeInsights} from "../services/insights.service.js";
 
 
 export const registerUser = asyncHandler(async (req, res) => {
