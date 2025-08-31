@@ -17,10 +17,12 @@ const recommendationSchema = new mongoose.Schema({
   confidence_score: Number,
   gender: [genderSchema],
   image_url: String,
-  items: {
-    shoe: itemSchema
-    // you can expand with more clothing types if needed
-  },
+  items: [
+    {
+      type: Map,       // 🔑 key = category (pants/shirt/etc.)
+      of: itemSchema   // value = itemSchema
+    }
+  ],
   missing_categories: [String],
   product_url: String,
   set_id: String,
@@ -28,6 +30,7 @@ const recommendationSchema = new mongoose.Schema({
 }, { _id: false });
 
 const recommendSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   userPrompt: { type: String },
   budget: { type: Number },
   body_type: { type: String },

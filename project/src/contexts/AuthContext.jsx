@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
 
 const AuthContext = createContext();
 
@@ -15,6 +16,7 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true); // Add a loading state
+  const [recommendations, setRecommendations] = useState(null);
 
   // On initial load, check localStorage for a saved user session and token
   useEffect(() => {
@@ -38,6 +40,25 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
+  useEffect(() => {
+    if (!token) return;
+
+    const fetchRecommendations = async () => {
+      try {
+        const { data } = await axios.get("http://localhost:3000/api/recommend/all", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        setRecommendations(data.data);
+      } catch (error) {
+        console.error("Error fetching recommendations:", error);
+      }
+    };
+
+    fetchRecommendations();
+  }, [token]);
+
   const login = (backendData) => {
     // Destructure the token from the rest of the user data
     // const { token, ...userData } = backendData;
@@ -49,6 +70,7 @@ export const AuthProvider = ({ children }) => {
     setToken(backendData.token);
     setUser(backendData.user);
     setIsAuthenticated(true);
+    window.location.reload();
   };
 
   const logout = () => {
@@ -59,6 +81,8 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     setToken(null);
     setIsAuthenticated(false);
+    window.location.reload();
+    // setCartItems([]); // Clear cart on logout
   };
 
   const value = {
@@ -68,6 +92,8 @@ export const AuthProvider = ({ children }) => {
     loading, // Expose loading state
     login,
     logout,
+    recommendations,
+    setRecommendations
   };
 
   // Render children only when not in the initial loading state

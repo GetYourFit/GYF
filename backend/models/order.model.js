@@ -1,37 +1,36 @@
-// models/order.model.js
 import mongoose from "mongoose";
+
+const orderItemSchema = new mongoose.Schema({
+  id:String,
+  name: { type: String, required: true },
+  imageUrl: { type: String, required: true },
+  price: { type: Number, required: true },
+  quantity: { type: Number, required: true, default: 1 },
+  selectedSize: { type: String, required: true },
+  selectedColor: { type: String, required: true },
+  sizes: [String],
+  colors: [String]
+});
 
 const orderSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
-    // Single ordered item (image, description, price, qty)
-   items:[
-        {
-            image: { type: String, required: true },
-            description: { type: String, required: true },
-            price: { type: Number, required: true },
-            quantity: { type: Number, required: true, min: 1 }
-        }
-   ],
+    items: [orderItemSchema],
+
     totalAmount: { type: Number, required: true },
-    shippingAddress: {
-      addressLine1: { type: String, required: true },
-      addressLine2: { type: String },
-      city: { type: String, required: true },
-      state: { type: String, required: true },
-      postalCode: { type: String, required: true },
-      country: { type: String, required: true },
-    },
+
     orderStatus: {
       type: String,
-      enum: ["In-Cart","processing", "shipped", "delivered", "cancelled"],
+      enum: ["In-Cart", "processing", "shipped", "delivered", "cancelled"],
       default: "processing",
     },
+
     paymentMethod: {
       type: String,
       enum: ["card", "upi", "cod"],
     },
+
     paymentStatus: {
       type: String,
       enum: ["pending", "paid", "failed"],

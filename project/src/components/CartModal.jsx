@@ -4,7 +4,7 @@ import { X, Plus, Minus, ShoppingBag, Trash2 } from 'lucide-react';
 import { useCart } from '../contexts/CartContext';
 
 const CartModal = ({ isOpen, onClose }) => {
-  const { cartItems, updateQuantity, removeFromCart, getTotalPrice, clearCart } = useCart();
+  const { cartItems, updateQuantity, removeFromCart, getTotalPrice, clearCart,handleCheckout } = useCart();
 
   return (
     <AnimatePresence>
@@ -64,18 +64,18 @@ const CartModal = ({ isOpen, onClose }) => {
                       >
                         <div className="w-16 h-16 bg-white rounded-lg overflow-hidden flex-shrink-0">
                           <img
-                            src={cartItem.item.imageUrl}
-                            alt={cartItem.item.name}
+                            src={cartItem.imageUrl}
+                            alt={cartItem.name}
                             className="w-full h-full object-cover"
                           />
                         </div>
                         
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-medium text-gray-900 truncate">{cartItem.item.name}</h3>
+                          <h3 className="font-medium text-gray-900 truncate">{cartItem.name}</h3>
                           <p className="text-sm text-gray-600">
                             {cartItem.selectedColor} • {cartItem.selectedSize}
                           </p>
-                          <p className="text-lg font-bold text-gray-900">${cartItem.item.price}</p>
+                          <p className="text-lg font-bold text-gray-900">${cartItem.price}</p>
                         </div>
 
                         <div className="flex flex-col items-end space-y-2">
@@ -117,7 +117,7 @@ const CartModal = ({ isOpen, onClose }) => {
                   </div>
                   
                   <div className="space-y-2">
-                    <button className="w-full bg-black text-white py-3 rounded-xl font-medium hover:bg-gray-800 transition-colors">
+                    <button onClick={handleCheckout} className="w-full bg-black text-white py-3 rounded-xl font-medium hover:bg-gray-800 transition-colors">
                       Checkout
                     </button>
                     <button

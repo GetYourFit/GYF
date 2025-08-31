@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ShoppingBag, User, Heart, LogOut } from 'lucide-react';
+import { Search, ShoppingBag, User, Heart, LogOut, Info } from 'lucide-react'; // 👈 added Info
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -7,6 +7,7 @@ import SearchModal from './SearchModal';
 import CartModal from './CartModal';
 import AuthModals from './AuthModals';
 import CategoryModal from './CategoryModal';
+import InsightsModal from './InsightsModal'; // 👈 new modal component
 
 const Header = ({ onLogoClick, onCategorySelect }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -14,6 +15,7 @@ const Header = ({ onLogoClick, onCategorySelect }) => {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const [isInsightsOpen, setIsInsightsOpen] = useState(false); // 👈 new state
   const [selectedCategory, setSelectedCategory] = useState('');
   const { getTotalItems } = useCart();
   const { isAuthenticated, user, logout } = useAuth();
@@ -138,6 +140,16 @@ const Header = ({ onLogoClick, onCategorySelect }) => {
                   >
                     <Heart className="h-5 w-5" />
                   </motion.button>
+
+                  {/* 👇 New Info Button */}
+                  <motion.button
+                    onClick={() => setIsInsightsOpen(true)}
+                    className="p-3 text-gray-600 hover:text-gray-900 transition-colors rounded-full hover:bg-gray-100"
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                  >
+                    <Info className="h-5 w-5" />
+                  </motion.button>
                   
                   <motion.button
                     onClick={() => setIsCartOpen(true)}
@@ -170,6 +182,7 @@ const Header = ({ onLogoClick, onCategorySelect }) => {
         <>
           <SearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />
           <CartModal isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
+          <InsightsModal isOpen={isInsightsOpen} onClose={() => setIsInsightsOpen(false)} /> {/* 👈 */}
         </>
       )}
       

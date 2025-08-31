@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Header from './components/Header';
 import Hero from './components/Hero';
@@ -9,38 +10,30 @@ import { CartProvider } from './contexts/CartContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 function AppContent() {
-  const [currentView, setCurrentView] = useState('home');
   const [userPreferences, setUserPreferences] = useState(null);
   const [userPrompt, setUserPrompt] = useState('');
+  const [showCamera, setShowCamera] = useState(false);
   const { isAuthenticated } = useAuth();
 
   const handleStartCamera = () => {
-    setCurrentView('camera');
-  };
-
-  const handleShowLogin = () => {
-    // This will be handled by the Header component
+    setShowCamera(true);
   };
 
   const handleCameraAnalysisComplete = (analysis, preferences, prompt) => {
-    console.log(preferences, prompt,analysis);
     setUserPreferences(preferences);
     setUserPrompt(prompt);
-    setCurrentView('catalog');
+    setShowCamera(false);
+    // Navigation will be handled by the component that triggers this
   };
 
   const handleBackHome = () => {
-    setCurrentView('home');
     setUserPreferences(null);
     setUserPrompt('');
   };
 
-  const handleCategorySelect = (category) => {
-    // Category selection is handled in the CategoryModal
-  };
-
   return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 relative overflow-hidden">
+    <Router>
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 relative overflow-hidden">
         <FloatingClothes />
         
         <motion.div
@@ -49,33 +42,41 @@ function AppContent() {
           animate={{ opacity: 1 }}
           transition={{ duration: 0.8 }}
         >
-          <Header 
-            onLogoClick={handleBackHome} 
-            onCategorySelect={handleCategorySelect}
-          />
+          <Header onLogoClick={handleBackHome} />
           
-          {currentView === 'home' && (
-            <Hero 
-              onStartCamera={handleStartCamera}
-              onShowLogin={handleShowLogin}
+          <Routes>
+            <Route 
+              path="/" 
+              element={
+                <Hero 
+                  onStartCamera={handleStartCamera}
+                />
+              } 
             />
-          )}
-          
-          {currentView === 'catalog' && userPreferences && (
-            <OutfitCatalog 
-              preferences={userPreferences}
-              prompt={userPrompt}
-              onBack={handleBackHome}
+            <Route 
+              path="/catalog" 
+              element={
+                // userPreferences ? (
+                  <OutfitCatalog 
+                    preferences={userPreferences}
+                    prompt={userPrompt}
+                    onBack={handleBackHome}
+                  />
+                // ) : (
+                //   <Navigate to="/" replace />
+                // )
+              } 
             />
-          )}
+          </Routes>
 
           <CameraCapture
-            isOpen={currentView === 'camera'}
-            onClose={handleBackHome}
+            isOpen={showCamera}
+            onClose={() => setShowCamera(false)}
             onAnalysisComplete={handleCameraAnalysisComplete}
           />
         </motion.div>
       </div>
+    </Router>
   );
 }
 

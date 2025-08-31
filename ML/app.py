@@ -38,6 +38,7 @@ def handle_recommendation_request(process_user_image_func, retrieve_similar_outf
             return jsonify({"error": "Image file is required."}), 400
 
         image = request.files["image"]
+        print(image)
 
         if not image.filename:
             return jsonify({"error": "No image file selected."}), 400
@@ -46,9 +47,10 @@ def handle_recommendation_request(process_user_image_func, retrieve_similar_outf
             return jsonify({"error": "Uploaded file must be an image."}), 400
 
         prompt = request.form.get("prompt", "").strip()
-
+        print(prompt)
         try:
             budget = int(request.form.get("budget", "1000000"))
+            print(budget)
             if budget <= 0:
                 return jsonify({"error": "Budget must be a positive integer."}), 400
         except (ValueError, TypeError):

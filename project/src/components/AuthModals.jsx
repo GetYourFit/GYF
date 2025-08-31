@@ -1,13 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Eye, EyeOff, Mail, Phone, Calendar, AlertCircle } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext'; // Assuming useAuth is in a parent context
 
-// NOTE: This is a placeholder for a real API. In a real application,
-// you would replace these URLs with your actual backend endpoints.
-const API_URL = 'http://localhost:3000/api';
-
-// --- Helper Components moved to the top level ---
+// --- Helper Components ---
 
 const ModalWrapper = ({ isOpen, onClose, children }) => (
   <AnimatePresence>
@@ -52,7 +48,13 @@ const ErrorDisplay = ({ message }) => (
 // --- Main AuthModals Component ---
 
 const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, onSwitchToSignup, onSwitchToLogin }) => {
-  const {login} = useAuth();
+  const { login } = useAuth(); // Assuming useAuth provides a login function
+  // 
+  // Mock login function if useAuth is not available in this context
+  // const login = (userData) => {
+  //   console.log("Logged in user:", userData);
+  // };
+
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -72,20 +74,27 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
     DOB: ''
   });
 
-  // Reset state when modals are closed
+  // NOTE: This is a placeholder for a real API. In a real application,
+  // you would replace these URLs with your actual backend endpoints.
+  const API_URL = 'http://localhost:3000/api';
+
+  // --- Modal Closing and State Reset ---
+
   const handleCloseLogin = () => {
     setLoginData({ email: '', password: '' });
     setError(null);
-    setIsLoading(false);
+    setShowPassword(false);
     onCloseLogin();
   };
   
   const handleCloseSignup = () => {
     setSignupData({ firstName: '', lastName: '', email: '', password: '', PhoneNumber: '', Gender: '', DOB: '' });
     setError(null);
-    setIsLoading(false);
+    setShowPassword(false);
     onCloseSignup();
   };
+
+  // --- API Handlers ---
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -101,19 +110,18 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
 
       const data = await response.json();
 
-
       if (!response.ok) {
         throw new Error(data.message || 'Failed to login.');
       }
 
-      // Handle successful login (e.g., store token, update user context)
-      login(data)
+      // Handle successful login using context
+      login(data);
       console.log('Login successful:', data);
       handleCloseLogin();
       
-    } catch (error) {
-      console.error('Login failed:', error);
-      setError(error.message);
+    } catch (err) {
+      console.error('Login failed:', err);
+      setError(err.message);
     } finally {
       setIsLoading(false);
     }
@@ -123,12 +131,16 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
     e.preventDefault();
     setIsLoading(true);
     setError(null);
+
+    // Ensure date is sent as a simple string 'YYYY-MM-DD'
+    const payload = { ...signupData, DOB: signupData.DOB };
+
     try {
       // Replace with your actual API endpoint for signup
       const response = await fetch(`${API_URL}/users/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(signupData),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -137,18 +149,24 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
         throw new Error(data.message || 'Failed to create account.');
       }
       
-      // Handle successful signup (e.g., show success message, auto-login)
       console.log('Signup successful:', data);
-      handleCloseSignup();
+      
+      // Pre-fill login form with the new user's email for a better UX
+      setLoginData(prev => ({...prev, email: signupData.email, password: ''}));
 
-    } catch (error) {
-      console.error('Signup failed:', error);
-      setError(error.message);
+      // Switch to the login modal after successful signup
+      onSwitchToLogin();
+
+    } catch (err) {
+      console.error('Signup failed:', err);
+      setError(err.message);
     } finally {
       setIsLoading(false);
     }
   };
   
+  // --- Input Change Handlers ---
+
   const handleLoginInputChange = (e) => {
     const { name, value } = e.target;
     setLoginData(prev => ({ ...prev, [name]: value }));
@@ -168,7 +186,7 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
             <h2 className="text-2xl font-bold text-gray-900">Welcome Back</h2>
             <button
               onClick={handleCloseLogin}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
             >
               <X className="h-6 w-6" />
             </button>
@@ -248,7 +266,7 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
             <h2 className="text-2xl font-bold text-gray-900">Create Account</h2>
             <button
               onClick={handleCloseSignup}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
             >
               <X className="h-6 w-6" />
             </button>
@@ -337,7 +355,7 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
                 <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                 <input
                   type="tel"
-                  name="phoneNumber"
+                  name="PhoneNumber" // FIXED: Was 'phoneNumber'
                   value={signupData.PhoneNumber}
                   onChange={handleSignupInputChange}
                   className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -352,10 +370,10 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
                 Gender
               </label>
               <select
-                name="gender"
+                name="Gender" // FIXED: Was 'gender'
                 value={signupData.Gender}
                 onChange={handleSignupInputChange}
-                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                 required
               >
                 <option value="">Select Gender</option>
@@ -374,7 +392,7 @@ const AuthModals = ({ isLoginOpen, isSignupOpen, onCloseLogin, onCloseSignup, on
                 <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                 <input
                   type="date"
-                  name="dateOfBirth"
+                  name="DOB" // FIXED: Was 'dateOfBirth'
                   value={signupData.DOB}
                   onChange={handleSignupInputChange}
                   className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
